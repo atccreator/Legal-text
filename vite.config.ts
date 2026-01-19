@@ -5,6 +5,7 @@ import path from 'path'
 export default defineConfig({
   root: path.join(__dirname, 'app/renderer'),
   base: './',
+  publicDir: path.join(__dirname, 'app/renderer/public'),
   plugins: [react()],
   build: {
     outDir: '../../dist/renderer',

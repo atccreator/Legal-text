@@ -1,7 +1,7 @@
 {
   // Visit https://aka.ms/tsconfig to read more about this file
   "compilerOptions": {
-    // File Layout
+    // File Layout (individual project tsconfigs can override)
     "rootDir": "./app",
     "outDir": "./dist",
 
