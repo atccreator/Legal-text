@@ -1,10 +1,26 @@
+import { useCallback } from 'react'
 import { UploadButton } from './UploadZone'
 import { DocumentTabs } from './DocumentTabs'
 import { useLinkStore } from '../store/linkStore'
+import { pdfSelectionController } from '../pdf/selection/PdfSelectionController'
 
 export function Toolbar() {
   const linksCount = useLinkStore((s) => s.links.length)
-  const clearLinks = useLinkStore((s) => s.clearLinks)
+
+  // Use callback with getState() to avoid function dependency
+  const handleClearLinks = useCallback(() => {
+    useLinkStore.getState().clearLinks()
+  }, [])
+
+  // Debug: Create a test link manually
+  const handleTestLink = useCallback(() => {
+    console.log('[Toolbar] Creating test link...')
+    pdfSelectionController.emit({
+      documentId: 'test-doc',
+      pageIndex: 0,
+      rect: { x: 0.1, y: 0.2, w: 0.3, h: 0.1 }
+    })
+  }, [])
 
   return (
     <header className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4 flex-shrink-0">
@@ -26,13 +42,21 @@ export function Toolbar() {
 
       {/* Right side - Actions */}
       <div className="flex items-center gap-3">
+        {/* Debug test button */}
+        <button
+          onClick={handleTestLink}
+          className="px-3 py-1.5 text-xs font-medium text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-lg transition-colors"
+        >
+          🧪 Test Link
+        </button>
+        
         {linksCount > 0 && (
           <div className="flex items-center gap-2">
             <span className="text-sm text-gray-500">
               {linksCount} link{linksCount !== 1 ? 's' : ''}
             </span>
             <button
-              onClick={clearLinks}
+              onClick={handleClearLinks}
               className="text-sm text-gray-500 hover:text-red-600 transition-colors"
             >
               Clear all

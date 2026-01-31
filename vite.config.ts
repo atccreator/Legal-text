@@ -7,8 +7,20 @@ export default defineConfig({
   base: './',
   publicDir: path.join(__dirname, 'app/renderer/public'),
   plugins: [react()],
+  server: {
+    port: 5173,
+    strictPort: true,
+  },
+  // Force development mode to see full React error messages
+  mode: 'development',
+  define: {
+    'process.env.NODE_ENV': JSON.stringify('development'),
+  },
   build: {
     outDir: '../../dist/renderer',
-    emptyOutDir: true
+    emptyOutDir: true,
+    // Disable minification to see readable stack traces
+    minify: false,
+    sourcemap: true,
   }
 })

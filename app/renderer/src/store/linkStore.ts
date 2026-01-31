@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { Link, PdfAnchor, WorkspaceNode } from '../workspace/types'
+import { useToastStore } from './toastStore'
 
 interface LinkState {
   links: Link[]
@@ -23,6 +24,9 @@ export const useLinkStore = create<LinkState>()(
           id: crypto.randomUUID(),
           position: toPosition,
         },
+        metadata: {
+          createdAt: Date.now(),
+        },
       }
 
       console.log('[LinkStore] New link created:', newLink.id)
@@ -30,6 +34,9 @@ export const useLinkStore = create<LinkState>()(
       set((state) => ({
         links: [...state.links, newLink],
       }))
+      
+      // Show success toast
+      useToastStore.getState().addToast('Link created successfully!', 'success', 2500)
 
       return newLink
     },
@@ -38,6 +45,7 @@ export const useLinkStore = create<LinkState>()(
       set((state) => ({
         links: state.links.filter((link) => link.id !== id),
       }))
+      useToastStore.getState().addToast('Link removed', 'info', 2000)
     },
 
     updateNodePosition: (linkId: string, position: { x: number; y: number }) => {
@@ -55,7 +63,11 @@ export const useLinkStore = create<LinkState>()(
     },
 
     clearLinks: () => {
+      const count = get().links.length
       set({ links: [] })
+      if (count > 0) {
+        useToastStore.getState().addToast(`Cleared ${count} link${count !== 1 ? 's' : ''}`, 'info', 2000)
+      }
     },
   }))
 )

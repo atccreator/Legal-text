@@ -40,6 +40,8 @@ export class LinkRenderer {
       
       // Ensure links render below nodes
       this.container.setChildIndex(g, 0)
+      
+      console.log('[LinkRenderer] Created new link graphics for:', id)
     }
 
     const opts = { ...DEFAULT_OPTIONS, ...options }

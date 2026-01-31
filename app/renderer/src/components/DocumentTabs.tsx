@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import { useDocumentStore } from '../store/documentStore'
 
 interface DocumentTabsProps {
@@ -5,7 +6,18 @@ interface DocumentTabsProps {
 }
 
 export function DocumentTabs({ className = '' }: DocumentTabsProps) {
-  const { documents, activeDocumentId, setActiveDocument, removeDocument } = useDocumentStore()
+  // Only select primitive/stable values from the store
+  const documents = useDocumentStore((s) => s.documents)
+  const activeDocumentId = useDocumentStore((s) => s.activeDocumentId)
+
+  // Use callbacks with getState() to avoid function dependencies
+  const handleSetActive = useCallback((id: string) => {
+    useDocumentStore.getState().setActiveDocument(id)
+  }, [])
+
+  const handleRemove = useCallback((id: string) => {
+    useDocumentStore.getState().removeDocument(id)
+  }, [])
 
   if (documents.length === 0) return null
 
@@ -22,7 +34,7 @@ export function DocumentTabs({ className = '' }: DocumentTabsProps) {
               : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
             }
           `}
-          onClick={() => setActiveDocument(doc.id)}
+          onClick={() => handleSetActive(doc.id)}
         >
           <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -35,7 +47,7 @@ export function DocumentTabs({ className = '' }: DocumentTabsProps) {
           <button
             onClick={(e) => {
               e.stopPropagation()
-              removeDocument(doc.id)
+              handleRemove(doc.id)
             }}
             className={`
               p-0.5 rounded opacity-0 group-hover:opacity-100 

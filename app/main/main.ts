@@ -13,8 +13,13 @@ function createWindow() {
     }
   })
 
-  win.webContents.openDevTools()
-  win.loadFile(path.join(__dirname, '../renderer/index.html'))
+  if (!app.isPackaged) {
+    const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173/'
+    win.webContents.openDevTools()
+    win.loadURL(devUrl)
+  } else {
+    win.loadFile(path.join(__dirname, '../renderer/index.html'))
+  }
 }
 
 app.whenReady().then(() => {

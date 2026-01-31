@@ -1,5 +1,9 @@
 import { useCallback, useRef, useState } from 'react'
 import { useDocumentStore } from '../store/documentStore'
+import { useToastStore } from '../store/toastStore'
+
+// Sample PDF URL for demo/testing
+const DEMO_PDF_URL = 'https://www.w3.org/WAI/WCAG21/Techniques/pdf/img/table-word.pdf'
 
 interface UploadZoneProps {
   onUpload?: (file: File) => void
@@ -8,23 +12,40 @@ interface UploadZoneProps {
 
 export function UploadZone({ onUpload, className = '' }: UploadZoneProps) {
   const [isDragOver, setIsDragOver] = useState(false)
+  const [isLoadingDemo, setIsLoadingDemo] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const { addDocument, isUploading } = useDocumentStore()
+  // Only select primitive values from the store
+  const isUploading = useDocumentStore((s) => s.isUploading)
 
   const handleFile = useCallback(async (file: File) => {
     if (file.type !== 'application/pdf') {
-      alert('Please upload a PDF file')
+      useToastStore.getState().addToast('Please upload a PDF file', 'error')
       return
     }
     
     try {
-      await addDocument(file)
+      await useDocumentStore.getState().addDocument(file)
       onUpload?.(file)
     } catch (error) {
       console.error('Failed to load PDF:', error)
-      alert('Failed to load PDF file')
+      useToastStore.getState().addToast('Failed to load PDF file', 'error')
     }
-  }, [addDocument, onUpload])
+  }, [onUpload])
+
+  const handleLoadDemo = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setIsLoadingDemo(true)
+    
+    try {
+      useDocumentStore.getState().addDocumentFromUrl(DEMO_PDF_URL, 'Sample Document.pdf')
+      useToastStore.getState().addToast('Demo PDF loaded!', 'success')
+    } catch (error) {
+      console.error('Failed to load demo PDF:', error)
+      useToastStore.getState().addToast('Failed to load demo PDF', 'error')
+    } finally {
+      setIsLoadingDemo(false)
+    }
+  }, [])
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -123,6 +144,22 @@ export function UploadZone({ onUpload, className = '' }: UploadZoneProps) {
           <p className="text-sm text-gray-500">
             Drag & drop or click to browse
           </p>
+          
+          {/* Demo PDF button */}
+          <button
+            onClick={handleLoadDemo}
+            disabled={isLoadingDemo}
+            className="mt-4 px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors duration-150 disabled:opacity-50"
+          >
+            {isLoadingDemo ? (
+              <span className="flex items-center gap-2">
+                <div className="w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+                Loading demo...
+              </span>
+            ) : (
+              '→ Try with a sample PDF'
+            )}
+          </button>
           
           <div className="mt-4 flex items-center gap-2 text-xs text-gray-400">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

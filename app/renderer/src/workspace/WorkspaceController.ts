@@ -5,6 +5,7 @@ import { PdfAnchor, Link, WorkspaceNode } from './types'
 import { pdfSelectionController } from '../pdf/selection/PdfSelectionController'
 import { useLinkStore } from '../store/linkStore'
 import { usePdfViewportStore } from '../store/pdfViewportStore'
+import { useWorkspaceViewportStore } from '../store/workspaceViewportStore'
 
 // Constants for visual styling
 const NODE_COLORS = {
@@ -45,11 +46,13 @@ export class WorkspaceController {
   private isPinching = false
 
   constructor(container: HTMLElement) {
+    console.log('[WorkspaceController] Constructor called')
     this.containerElement = container
     this.init(container)
   }
 
   private async init(container: HTMLElement) {
+    console.log('[WorkspaceController] Initializing...')
     const { app, world, resizeObserver, grid } = await createWorkspace(container)
 
     this.app = app
@@ -75,8 +78,46 @@ export class WorkspaceController {
     // Subscribe to link store changes
     this.setupLinkStoreSubscription()
     
+    // Setup viewport tracking
+    this.setupViewportTracking()
+    
     // Start render loop for smooth link updates
     this.startRenderLoop()
+  }
+
+  /**
+   * Setup viewport tracking for coordinate synchronization
+   */
+  private setupViewportTracking() {
+    // Initialize workspace viewport store with panel rect
+    const updatePanelRect = () => {
+      if (this.containerElement) {
+        const rect = this.containerElement.getBoundingClientRect()
+        useWorkspaceViewportStore.getState().setPanelRect(rect)
+      }
+    }
+    
+    updatePanelRect()
+    
+    // Setup resize observer for panel rect updates
+    const resizeObserver = new ResizeObserver(updatePanelRect)
+    if (this.containerElement) {
+      resizeObserver.observe(this.containerElement)
+    }
+    
+    // Sync initial world transform
+    this.syncViewportState()
+  }
+  
+  /**
+   * Sync current world transform to viewport store
+   */
+  private syncViewportState() {
+    useWorkspaceViewportStore.getState().setWorldTransform(
+      this.world.x,
+      this.world.y,
+      this.scale
+    )
   }
 
   /**
@@ -93,14 +134,18 @@ export class WorkspaceController {
    * Handle PDF selection → create link → render
    */
   private setupSelectionHandler() {
+    console.log('[WorkspaceController] ====== Setting up PDF selection handler ======')
     const unsubscribe = pdfSelectionController.subscribe((anchor) => {
-      console.log('[WorkspaceController] Selection received:', anchor)
+      console.log('[WorkspaceController] ====== SELECTION RECEIVED! ======')
+      console.log('[WorkspaceController] Selection anchor:', JSON.stringify(anchor, null, 2))
       
       // Calculate workspace position for new node with elastic positioning
       const nodePosition = this.calculateNodePosition(anchor)
+      console.log('[WorkspaceController] Node position:', nodePosition)
       
       // Create link in store
       const link = useLinkStore.getState().addLink(anchor, nodePosition)
+      console.log('[WorkspaceController] Link created:', link.id)
       
       // Create visual node with animation
       this.createWorkspaceNode(link)
@@ -130,12 +175,12 @@ export class WorkspaceController {
   private calculateNodePosition(anchor: PdfAnchor): { x: number; y: number } {
     const existingLinks = useLinkStore.getState().links
     
-    // Base position - to the right of center
-    let baseX = 100
-    let baseY = 0
+    // Base position - to the right in world space (nodes appear in center-right area)
+    let baseX = 150
     
-    // Adjust Y based on PDF anchor position
-    baseY = (anchor.rect.y - 0.5) * 400
+    // Y position based on PDF anchor position (mapped from 0-1 to world coords)
+    let baseY = (anchor.rect.y + anchor.rect.h / 2 - 0.5) * 600
+    baseY += anchor.pageIndex * 200 // Page offset
     
     // Apply elastic snapping - avoid overlapping with existing nodes
     const snapDistance = 100
@@ -151,6 +196,8 @@ export class WorkspaceController {
     
     // Add slight randomness for visual variety
     baseX += (Math.random() - 0.5) * 50
+    
+    console.log('[WorkspaceController] Calculated node position:', { x: baseX, y: finalY })
     
     return { x: baseX, y: finalY }
   }
@@ -286,34 +333,25 @@ export class WorkspaceController {
   }
 
   /**
-   * Map PDF anchor to workspace coordinates using viewport store
+   * Map PDF anchor to workspace coordinates - using WORLD coordinates
+   * The bezier starts from the LEFT edge of the workspace (world origin)
+   * and connects to the node position
    */
   mapPdfAnchorToWorkspace(anchor: PdfAnchor): { x: number; y: number } {
-    const pdfViewport = usePdfViewportStore.getState()
-    const screenPoint = pdfViewport.pageToScreen(
-      anchor.pageIndex,
-      anchor.rect.x + anchor.rect.w / 2, // Center of selection
-      anchor.rect.y + anchor.rect.h / 2
-    )
+    // Since the link starts from the PDF side (left), we place the start point
+    // at the left edge of the visible workspace area
+    // The Y position is based on the anchor's relative position
     
-    if (screenPoint && this.containerElement) {
-      // Convert screen coords to workspace world coords
-      const containerRect = this.containerElement.getBoundingClientRect()
-      const relativeX = screenPoint.x - containerRect.left
-      const relativeY = screenPoint.y - containerRect.top
-      
-      // Transform to world coordinates
-      const worldX = (relativeX - this.world.x) / this.scale
-      const worldY = (relativeY - this.world.y) / this.scale
-      
-      return { x: worldX, y: worldY }
-    }
+    // Calculate Y position based on anchor position on page
+    // Map from normalized (0-1) to world space
+    const baseY = (anchor.rect.y + anchor.rect.h / 2 - 0.5) * 600
+    const pageOffset = anchor.pageIndex * 200 // Offset for multi-page
     
-    // Fallback: estimate based on anchor data
-    const baseX = -200
-    const baseY = (anchor.pageIndex * 200) + (anchor.rect.y * 400) - 200
+    // Start from far left of workspace (this represents the "PDF edge" in world space)
+    const startX = -350 // Left edge where bezier originates
+    const startY = baseY + pageOffset
     
-    return { x: baseX, y: baseY }
+    return { x: startX, y: startY }
   }
 
   /**
@@ -331,11 +369,24 @@ export class WorkspaceController {
     // Connect to left edge of node (connection point)
     const halfW = NODE_DIMENSIONS.width / 2
     
+    // Debug log first time
+    if (!this._loggedLinks) this._loggedLinks = new Set()
+    if (!this._loggedLinks.has(link.id)) {
+      console.log('[WorkspaceController] Rendering link:', {
+        id: link.id,
+        startPos,
+        endPos: { x: endPos.x - halfW, y: endPos.y },
+      })
+      this._loggedLinks.add(link.id)
+    }
+    
     this.linkRenderer.renderLink(link.id, {
       start: startPos,
       end: { x: endPos.x - halfW, y: endPos.y },
     })
   }
+  
+  private _loggedLinks?: Set<string>
 
   /**
    * Start render loop for smooth link updates
@@ -385,6 +436,9 @@ export class WorkspaceController {
       this.world.y += dy
 
       last = { x: e.clientX, y: e.clientY }
+      
+      // Sync viewport state for coordinate mapping
+      this.syncViewportState()
     })
   }
 
@@ -404,13 +458,16 @@ export class WorkspaceController {
     
     canvas.addEventListener('touchmove', (e: TouchEvent) => {
       if (!this.isPinching || e.touches.length !== 2) return
+      const touch0 = e.touches[0]
+      const touch1 = e.touches[1]
+      if (!touch0 || !touch1) return
       
       const currentDistance = this.getPinchDistance(e.touches)
       const delta = currentDistance / this.lastPinchDistance
       
       // Get center point of pinch
-      const centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2
-      const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2
+      const centerX = (touch0.clientX + touch1.clientX) / 2
+      const centerY = (touch0.clientY + touch1.clientY) / 2
       const rect = canvas.getBoundingClientRect()
       
       this.zoom(delta, centerX - rect.left, centerY - rect.top)
@@ -427,8 +484,11 @@ export class WorkspaceController {
    * Calculate distance between two touch points
    */
   private getPinchDistance(touches: TouchList): number {
-    const dx = touches[0].clientX - touches[1].clientX
-    const dy = touches[0].clientY - touches[1].clientY
+    const touch0 = touches[0]
+    const touch1 = touches[1]
+    if (!touch0 || !touch1) return 0
+    const dx = touch0.clientX - touch1.clientX
+    const dy = touch0.clientY - touch1.clientY
     return Math.sqrt(dx * dx + dy * dy)
   }
 
@@ -453,6 +513,9 @@ export class WorkspaceController {
     } else {
       this.world.scale.set(this.scale)
     }
+    
+    // Sync viewport state for coordinate mapping
+    this.syncViewportState()
   }
 
   /**

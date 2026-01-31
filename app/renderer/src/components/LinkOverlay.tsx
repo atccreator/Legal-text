@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo, memo } from 'react'
 import { useLinkStore } from '../store/linkStore'
 import { usePdfViewportStore } from '../store/pdfViewportStore'
 import { useLayoutStore } from '../store/layoutStore'
+import { useDraggingStore } from '../store/draggingStore'
+import { useWorkspaceViewportStore } from '../store/workspaceViewportStore'
 
 interface Point {
   x: number
@@ -13,9 +15,11 @@ interface BezierLinkProps {
   start: Point
   end: Point
   isHighlighted?: boolean
+  isGhost?: boolean
 }
 
-function BezierLink({ id, start, end, isHighlighted = false }: BezierLinkProps) {
+// Memoized BezierLink component for performance
+const BezierLink = memo(function BezierLink({ id, start, end, isHighlighted = false, isGhost = false }: BezierLinkProps) {
   // Calculate control points for smooth S-curve
   const dx = end.x - start.x
   const distance = Math.sqrt(dx * dx + Math.pow(end.y - start.y, 2))
@@ -26,13 +30,16 @@ function BezierLink({ id, start, end, isHighlighted = false }: BezierLinkProps) 
 
   const pathD = `M ${start.x} ${start.y} C ${cp1.x} ${cp1.y}, ${cp2.x} ${cp2.y}, ${end.x} ${end.y}`
 
+  const strokeColor = isGhost ? '#8b5cf6' : (isHighlighted ? '#4f46e5' : '#6366f1')
+  const strokeOpacity = isGhost ? 0.7 : 0.85
+
   return (
     <g className="link-group">
       {/* Glow effect */}
       <path
         d={pathD}
         fill="none"
-        stroke={isHighlighted ? '#4f46e5' : '#6366f1'}
+        stroke={strokeColor}
         strokeWidth={isHighlighted ? 8 : 6}
         strokeLinecap="round"
         opacity={0.15}
@@ -43,19 +50,20 @@ function BezierLink({ id, start, end, isHighlighted = false }: BezierLinkProps) 
       <path
         d={pathD}
         fill="none"
-        stroke={isHighlighted ? '#4f46e5' : '#6366f1'}
-        strokeWidth={isHighlighted ? 3 : 2.5}
+        stroke={strokeColor}
+        strokeWidth={isGhost ? 2 : (isHighlighted ? 3 : 2.5)}
         strokeLinecap="round"
-        opacity={0.85}
-        className="transition-all duration-150"
+        opacity={strokeOpacity}
+        strokeDasharray={isGhost ? '8 4' : undefined}
+        className={isGhost ? 'ghost-link-path' : 'transition-all duration-150'}
       />
       
       {/* Start point indicator */}
       <circle
         cx={start.x}
         cy={start.y}
-        r={5}
-        fill={isHighlighted ? '#4f46e5' : '#6366f1'}
+        r={isGhost ? 6 : 5}
+        fill={strokeColor}
         opacity={0.9}
       />
       
@@ -63,13 +71,39 @@ function BezierLink({ id, start, end, isHighlighted = false }: BezierLinkProps) 
       <circle
         cx={end.x}
         cy={end.y}
-        r={4}
-        fill={isHighlighted ? '#4f46e5' : '#6366f1'}
-        opacity={0.7}
+        r={isGhost ? 8 : 4}
+        fill={isGhost ? 'white' : strokeColor}
+        stroke={isGhost ? strokeColor : undefined}
+        strokeWidth={isGhost ? 2 : undefined}
+        opacity={isGhost ? 1 : 0.7}
       />
+      
+      {/* Ghost link drop zone indicator */}
+      {isGhost && (
+        <circle
+          cx={end.x}
+          cy={end.y}
+          r={20}
+          fill={strokeColor}
+          opacity={0.1}
+        >
+          <animate
+            attributeName="r"
+            values="15;25;15"
+            dur="1s"
+            repeatCount="indefinite"
+          />
+          <animate
+            attributeName="opacity"
+            values="0.15;0.05;0.15"
+            dur="1s"
+            repeatCount="indefinite"
+          />
+        </circle>
+      )}
     </g>
   )
-}
+})
 
 export function LinkOverlay() {
   const svgRef = useRef<SVGSVGElement>(null)
@@ -78,7 +112,13 @@ export function LinkOverlay() {
   
   const links = useLinkStore((s) => s.links)
   const pdfViewport = usePdfViewportStore()
+  const workspaceViewport = useWorkspaceViewportStore()
   const leftWidth = useLayoutStore((s) => s.leftWidth)
+  
+  // Dragging state for ghost link
+  const isDragging = useDraggingStore((s) => s.isDragging)
+  const sourceScreenPos = useDraggingStore((s) => s.sourceScreenPos)
+  const currentPointerPos = useDraggingStore((s) => s.currentPointerPos)
 
   // Update SVG dimensions
   useEffect(() => {
@@ -102,26 +142,35 @@ export function LinkOverlay() {
       // Get PDF anchor screen position
       const screenPoint = pdfViewport.pageToScreen(
         link.from.pageIndex,
-        link.from.rect.x + link.from.rect.w / 2,
-        link.from.rect.y + link.from.rect.h / 2
+        link.from.rect.x + link.from.rect.w,  // Right edge
+        link.from.rect.y + link.from.rect.h / 2  // Vertical center
       )
 
       if (screenPoint) {
-        // Start point is on the PDF side (right edge of selection)
-        const startX = Math.min(screenPoint.x + (link.from.rect.w * (pdfViewport.pageDimensions.get(link.from.pageIndex)?.width || 100)) / 2, leftWidth - 10)
+        const startX = screenPoint.x
         const startY = screenPoint.y
 
-        // End point is on the workspace side
-        // The workspace is to the right of leftWidth
-        // We need to transform workspace coords to screen coords
-        const workspaceOffset = leftWidth + 8 // divider width
+        // Use workspace viewport store for accurate position mapping
+        const workspacePanelRect = workspaceViewport.panelRect
+        let endX: number, endY: number
         
-        // Simple mapping: workspace origin is at center of workspace panel
-        const workspaceCenterX = workspaceOffset + (dimensions.width - workspaceOffset) / 2
-        const workspaceCenterY = dimensions.height / 2
-        
-        const endX = workspaceCenterX + link.to.position.x
-        const endY = workspaceCenterY + link.to.position.y
+        if (workspacePanelRect) {
+          // Transform workspace world coords to screen coords
+          endX = workspacePanelRect.left + workspaceViewport.worldX + link.to.position.x * workspaceViewport.scale
+          endY = workspacePanelRect.top + workspaceViewport.worldY + link.to.position.y * workspaceViewport.scale
+          
+          // Adjust for node connection point (left edge)
+          const nodeHalfWidth = 70 // NODE_DIMENSIONS.width / 2
+          endX -= nodeHalfWidth * workspaceViewport.scale
+        } else {
+          // Fallback calculation
+          const workspaceOffset = leftWidth + 8
+          const workspaceCenterX = workspaceOffset + (dimensions.width - workspaceOffset) / 2
+          const workspaceCenterY = dimensions.height / 2
+          
+          endX = workspaceCenterX + link.to.position.x
+          endY = workspaceCenterY + link.to.position.y
+        }
 
         newPositions.set(link.id, {
           start: { x: startX, y: startY },
@@ -131,7 +180,7 @@ export function LinkOverlay() {
     })
 
     setLinkPositions(newPositions)
-  }, [links, pdfViewport, leftWidth, dimensions])
+  }, [links, pdfViewport, workspaceViewport, leftWidth, dimensions])
 
   // Update positions on animation frame
   useEffect(() => {
@@ -146,7 +195,8 @@ export function LinkOverlay() {
     return () => cancelAnimationFrame(animationFrameId)
   }, [calculateLinkPositions])
 
-  if (links.length === 0) return null
+  // Don't render anything if no links and not dragging
+  if (links.length === 0 && !isDragging) return null
 
   return (
     <svg
@@ -169,6 +219,7 @@ export function LinkOverlay() {
         </filter>
       </defs>
 
+      {/* Render existing links */}
       {Array.from(linkPositions.entries()).map(([id, pos]) => (
         <BezierLink
           key={id}
@@ -177,6 +228,16 @@ export function LinkOverlay() {
           end={pos.end}
         />
       ))}
+      
+      {/* Render ghost link while dragging */}
+      {isDragging && sourceScreenPos && currentPointerPos && (
+        <BezierLink
+          id="ghost-link"
+          start={sourceScreenPos}
+          end={currentPointerPos}
+          isGhost={true}
+        />
+      )}
     </svg>
   )
 }

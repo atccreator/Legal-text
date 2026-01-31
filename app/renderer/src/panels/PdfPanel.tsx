@@ -1,18 +1,10 @@
-// export default function PdfPanel() {
-//   return (
-//     <div className="h-full flex items-center justify-center text-gray-500">
-//       PDF Panel
-//     </div>
-//   )
-// }
-
-
-import { PdfViewer } from '../pdf/PdfViewer';
+// PDF Panel - using SimplePdfViewer with SelectionLayer for text selection and drag
+import { SimplePdfViewer } from '../pdf/SimplePdfViewer';
 
 export default function PdfPanel() {
   return (
     <div className="w-full h-full overflow-hidden">
-      <PdfViewer />
+      <SimplePdfViewer />
     </div>
   );
 }
